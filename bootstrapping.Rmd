@@ -111,3 +111,145 @@ boot_sample(sim_df_nonconst) %>%
 
 ```
 
+## Many samples and analysis
+Generate many bootstrap samples with replace from this dataset
+
+```{r}
+boot_straps =
+  tibble(
+    strap_number = 1:1000,
+    strap_sample = rerun(1000, boot_sample(sim_df_nonconst))
+  )
+
+#so what you have is a tibble with strap_number from 1 to 1000 and strap_sample which are the result of boot_sample bootstrap samples each consisting of a tibble for 250 rows
+#check to see what is inside each tibble
+
+boot_straps %>% pull(strap_sample)
+#runs for a long time - showing all 1000 bootstrap samples
+boot_straps %>% pull(strap_sample) %>% .[[1]]
+boot_straps %>% pull(strap_sample) %>% .[[2]]
+boot_straps %>% pull(strap_sample) %>% .[[3]]
+```
+
+Can I run my analysis on these...?
+Generate models for the strap_sample tibbles
+
+```{r}
+boot_results =
+  boot_straps %>% 
+  mutate(
+    models = map(.x = strap_sample, ~lm(y ~ x, data = .x)),
+    results = map(models, broom::tidy)
+  )
+
+#Let's see what we have 
+boot_results =
+  boot_straps %>% 
+  mutate(
+    models = map(.x = strap_sample, ~lm(y ~ x, data = .x)),
+    results = map(models, broom::tidy)
+  ) %>% pull(results) %>% .[[1]]
+#This is the intercept and slope for the first model
+
+boot_results =
+  boot_straps %>% 
+  mutate(
+    models = map(.x = strap_sample, ~lm(y ~ x, data = .x)),
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(strap_number, results) %>% 
+  unnest(results)
+
+```
+
+What do I have now?
+This is a long dataframe with 2000 rows. 1000 datasets - simple linear regression for each, and you get one intercept and slope for each.  Really for this exercise what Jeff is interested in is the estimated slope and estimated intercept.  So now let's look at distribution of slope and variance
+
+```{r}
+boot_results %>% 
+  group_by(term) %>% 
+  summarize(
+    mean_est = mean(estimate),
+    sd_est  = sd(estimate)
+  )
+#So, the process for bootstrap was to mimic repeated sampling.  Allowing me to get the actual variance from repeated sampling.
+#When comparing the bootstrap std error of intercept and slope, to the above model (code: lm(y ~ x, data = sim_df_nonconst) %>%  broom::tidy() ), you see that the sd error of intercept from bootstrap is LESS than the std. error from off-the-shelf model.  The st error of the slope from bootstrop is higher than the std. error from off-the-shelf model
+# so again, in the sm_df_nonconst dataset, the residuals are tight at intercept (x = 0) but more variance/scatter at higher values of x.  So: the bootstrap standard deviation of the intercept is LESS than in the off-the-shelf model (this is expected) whereas the bootstrap standard deviation of the slope is greater than in the off-the-shelf model (also expected). So this tells us the bootstrap is doing the right thing - the uncertainty measurements are more reflective of what is happening in this dataset
+```
+
+Look at the distributions
+
+```{r}
+boot_results %>% 
+  filter(term == "x") %>% 
+  ggplot(aes(x = estimate)) +
+  geom_density()
+#interpretation: under repeated sampling, what we are seeing is this is the actual distribution of estimated slopes is going to be.  We are not relying on orgdinary least squares or linear model theory to get an idea of what the standard error is.  We are using the bootstrap to say this is the kind of uncertainty you would see in this dataset if you did repeated sampling.
+#to get confidence interval, chop off 2.5% on either tail
+```
+
+Construct bootstrap CI
+
+```{r}
+boot_results %>% 
+  group_by(term) %>% 
+  summarize(
+    ci_lower = quantile(estimate, 0.025),
+    ci_upper = quantile(estimate, 0.975)
+  )
+#so this is our bootstrap confidence interval
+```
+
+
+## Bootstrap using modelr
+
+Can we simplify anything... ?
+YES
+
+```{r}
+sim_df_nonconst %>% 
+  bootstrap(1000, id = "strap_number") %>% 
+#this replaces the need to write the sample above
+#remodelr is creating a resampling object, not a dataframe
+#in the cross validation module, we then unnested these samples into dataframes
+#here, for what we want to do, we don't need to
+  mutate(
+    models = map(.x = strap, ~lm(y ~ x, data = .x)),
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(strap_number, results) %>% 
+  unnest(results) %>% 
+  group_by(term) %>% 
+  summarize(
+    mean_est = mean(estimate),
+    sd_est  = sd(estimate)
+  )
+#very similar to above results
+#this is mind-boggling that we are able to do this and the code isn't that complicated
+#very powerful to do this type of an analysis this quick
+#lm(y ~ x, data = sim_df_nonconst) %>%  broom::tidy()
+```
+
+Now, can we use the same code to check the constant residual dataset?
+
+```{r}
+sim_df_const %>% 
+  bootstrap(1000, id = "strap_number") %>% 
+  mutate(
+    models = map(.x = strap, ~lm(y ~ x, data = .x)),
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(strap_number, results) %>% 
+  unnest(results) %>% 
+  group_by(term) %>% 
+  summarize(
+    mean_est = mean(estimate),
+    sd_est  = sd(estimate)
+  )
+
+lm(y ~ x, data = sim_df_const) %>%  broom::tidy()
+
+#these estimates are very close, when the assumptions are in fact true
+#bootstrapping works in both cases.
+```
+
