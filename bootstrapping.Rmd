@@ -1,0 +1,113 @@
+---
+title: "Bootstrapping"
+output: github_document
+---
+
+```{r setup, include = FALSE}
+library(tidyverse)
+library(modelr)
+
+knitr::opts_chunk$set(
+  fig.width = 6,
+  fig.asp = .6,
+  out.width = "90%"
+)
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_colour_discrete = scale_color_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+
+set.seed(1)
+```
+
+
+## Simulate data
+```{r}
+n_samp = 250
+
+sim_df_const =
+  tibble(
+    x = rnorm(n_samp, 1, 1),
+    error = rnorm(n_samp, 0, 1),
+    y = 2 + 3 * x + error
+  )
+
+sim_df_nonconst =
+  sim_df_const %>% 
+  mutate(
+    error = error * .75 * x,
+    y = 2 + 3 * x + error
+  )
+```
+
+Plot the datasets
+```{r}
+sim_df_const %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+#Equal variances. Underlying assumption for linear regression
+
+sim_df_nonconst %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+#Unequal variance.  When x close to zero, residuals are very very small.  When x is far from zero, the residuals spread out.  Can still do linear regression, but one of the key assumptions - equal variance - is not met.  So difficult to make inferences - specifically difficult to construct confidence intervals.
+#We will try to solve this problem using bootstrapping
+```
+
+```{r}
+lm(y ~ x, data = sim_df_const) %>%  broom::tidy()
+lm(y ~ x, data = sim_df_nonconst) %>%  broom::tidy()
+```
+
+Bootstrap
+Try to solve this issue of unequal variances with the bootstrap
+What if I had another dataset like this one - get intercept and slope
+Repeat
+Repeat
+Could I just then look and see what is the actual variance of the intercept and slope under repeated sampling
+This is what we are trying to do with the bootstrap
+
+## Draw one bootstrap sample
+First, write a bootstrap function
+The reason for this is so that later, can repeat the function
+
+```{r}
+boot_sample = function(df) {
+  
+  sample_frac(df, replace = TRUE) %>% 
+#Why bootstrap sample should be the same size as original sample?  Because confidence intervals (variance estimates) are very sensitive to sample size.  Fewer point estimate = wider confidence interval and vice versa.  Mimicking sampling from the general population
+    arrange(x)
+#arrange because helps to visualize the data, but not an essential step - arrange doesn't actually change your results
+    
+}
+```
+
+Check if this works...
+
+```{r}
+boot_sample(sim_df_nonconst) %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_point(alpha = .3) +
+  geom_smooth(method = "lm") +
+  ylim(-5, 16)
+#fitted line moves slightly with each bootstrap sample
+
+#next, can I actually estimate that intercept and slope, and save those across bootstrap samples??
+```
+
+```{r}
+boot_sample(sim_df_nonconst) %>% 
+  lm(y ~ x, data = .) %>% 
+  broom::tidy()
+#next, can I actually estimate that intercept and slope, and save those across bootstrap samples??
+
+```
+
