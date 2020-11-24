@@ -16382,3 +16382,146 @@ lm(y ~ x, data = sim_df_const) %>%  broom::tidy()
 #these estimates are very close, when the assumptions are in fact true
 #bootstrapping works in both cases.
 ```
+
+## Revist nyc airbnb
+
+``` r
+data("nyc_airbnb")
+
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(stars = review_scores_location / 2) %>% 
+  rename(
+    borough = neighbourhood_group,
+    neighborhood = neighbourhood
+  ) %>% 
+  filter(
+    borough != "Staten Island"
+  ) %>% 
+  select(price, stars, borough, neighborhood, room_type)
+```
+
+``` r
+nyc_airbnb %>% 
+  ggplot(aes(x = stars, y = price)) +
+  geom_point()
+```
+
+    ## Warning: Removed 9962 rows containing missing values (geom_point).
+
+<img src="bootstrapping_files/figure-gfm/unnamed-chunk-15-1.png" width="90%" />
+
+``` r
+#unequal variance at different level of stars
+```
+
+So just look at Manhattan
+
+``` r
+nyc_airbnb %>% 
+  filter(borough == "Manhattan") %>% 
+  drop_na(stars) %>% 
+  ggplot(aes(x = stars, y = price)) +
+  geom_point()
+```
+
+<img src="bootstrapping_files/figure-gfm/unnamed-chunk-16-1.png" width="90%" />
+
+``` r
+#clearly nonconstant variance in the relationship between stars and price, and some outliers up there
+#so repeat the example as above, use bootstrapping
+#what Jeff would like to do to get the standard error for the linear model is to bootstrap - take a sample with replacement -  fit a regression of price against stars, and save the estimated intercept and slope each time.
+
+nyc_airbnb %>% 
+  filter(borough == "Manhattan") %>% 
+  drop_na(stars) %>%
+  bootstrap(1000, id = "strap_number") %>% 
+  mutate(
+    models = map(.x = strap, ~lm(price ~ stars, data = .x)),
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(strap_number, results) %>% 
+  unnest(results) %>% 
+  group_by(term) %>% 
+  summarize(
+    mean_est = mean(estimate),
+    sd_est  = sd(estimate)
+  )
+```
+
+    ## `summarise()` ungrouping output (override with `.groups` argument)
+
+    ## # A tibble: 2 x 3
+    ##   term        mean_est sd_est
+    ##   <chr>          <dbl>  <dbl>
+    ## 1 (Intercept)    -35.0  31.8 
+    ## 2 stars           43.4   6.43
+
+Compare this to `lm`
+
+``` r
+nyc_airbnb %>% 
+  filter(borough == "Manhattan") %>% 
+  drop_na(stars) %>%
+  lm(price ~ stars, data = .) %>% 
+  broom::tidy()
+```
+
+    ## # A tibble: 2 x 5
+    ##   term        estimate std.error statistic  p.value
+    ##   <chr>          <dbl>     <dbl>     <dbl>    <dbl>
+    ## 1 (Intercept)    -34.3     22.9      -1.50 1.35e- 1
+    ## 2 stars           43.3      4.78      9.07 1.39e-19
+
+``` r
+#So, assuming constant variances, the standard error of lm is 4.78, which is lower than bootstrap (6.62).  So it is quite a bit higher under the bootstrap than it is under the framework that assumes constant variance.  This is what you would expect because there is hgher residual variance at higher star rating - so the slope estimate under the lm should have more variance (std error is higher)
+#IF THE ACTUAL DATA SHOW MORE VARIATION, THE BOOTSTRAP VARIANCE WILL BE HIGHER THAN THE STRAIGHT UP OFF-THE-SHELF LINEAR MODEL'S VARIANCE, BECAUSE THE LINEAR MODEL ASSUMES EQUAL VARIANCES - WHEREAS THE BOOTSTRAP WILL USE ACTUAL REPEATED SAMPLING, WHICH WILL CAPTURE THE VARIABILITY IN THE ACTUAL DATA WHICH WILL TRANSLATE, OVER MANY ITERATIONS, IN THE VARIANCE OF THE BOOTSTRAP ESTIMATES OF SLOPE.
+```
+
+# IF THE ACTUAL DATA SHOW MORE VARIATION, THE BOOTSTRAP VARIANCE WILL BE HIGHER THAN THE STRAIGHT UP OFF-THE-SHELF LINEAR MODEL’S VARIANCE, BECAUSE THE LINEAR MODEL ASSUMES EQUAL VARIANCES - WHEREAS THE BOOTSTRAP WILL USE ACTUAL REPEATED SAMPLING, WHICH WILL CAPTURE THE VARIABILITY IN THE ACTUAL DATA WHICH WILL TRANSLATE, OVER MANY ITERATIONS, IN THE VARIANCE OF THE BOOTSTRAP ESTIMATES OF SLOPE.
+
+``` r
+airbnb_boot_results =
+  nyc_airbnb %>% 
+  filter(borough == "Manhattan") %>% 
+  drop_na(stars) %>%
+  bootstrap(1000, id = "strap_number") %>% 
+  mutate(
+    models = map(.x = strap, ~lm(price ~ stars, data = .x)),
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(strap_number, results) %>% 
+  unnest(results)
+
+airbnb_boot_results %>% 
+  group_by(term) %>% 
+  summarize(
+    mean_est = mean(estimate),
+    sd_est = sd(estimate)
+  )
+```
+
+    ## `summarise()` ungrouping output (override with `.groups` argument)
+
+    ## # A tibble: 2 x 3
+    ##   term        mean_est sd_est
+    ##   <chr>          <dbl>  <dbl>
+    ## 1 (Intercept)    -33.6  32.3 
+    ## 2 stars           43.2   6.57
+
+``` r
+airbnb_boot_results %>% 
+  filter(term == "stars") %>% 
+  ggplot(aes(x = estimate)) +
+  geom_density()
+```
+
+<img src="bootstrapping_files/figure-gfm/unnamed-chunk-18-1.png" width="90%" />
+
+``` r
+#interpretation: assuming constant variance, you would expect a normal distribution.  But there is some skewness - towards the LEFT.  
+#here, you get a distribution of your estimates under repeated sampling without have to assuming that this follows a normal distribution - you are actually getting what this distribution looks like under repeated sampling - this is fantastic.
+#Jeff doesn't do 95% CIs here but could just copy code.
+```
+
+# BOOTSTRAP DIFFERENT DATASETS - WRITE THE CODE - ONCE YOU GET USED TO MAPPING - GETTING USED TO MAPPING AND LIST COLUMNS. BUT THIS IS PRETTY AWESOME THAT WE CAN DO BOOTSTRAPPING AND CROSS-VALIDATIONS.
